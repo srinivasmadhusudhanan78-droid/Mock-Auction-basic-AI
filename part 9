@@ -1,0 +1,49 @@
+import random
+from typing import Optional
+
+# -------------------------------
+# AI Bidding Logic with Single ±0.5 Cr Adjustment
+# -------------------------------
+_ai_bid_adjustment_done = {}  # keeps track of which AI teams applied ±0.5Cr for each player
+
+def ai_bid(team, player, current_bid: float, rng: random.Random) -> Optional[float]:
+    """
+    AI bidding:
+    - Each AI team can bid ±0.5 Cr around hidden reserve only once per player
+    - Must respect hidden reserve ceiling
+    - Cannot exceed 1%-30% of team purse
+    """
+    global _ai_bid_adjustment_done
+
+    if not team.has_slot() or not team.can_afford(player.base_price):
+        return None
+
+    reserve = player._hidden_reserve or player.base_price
+    tier_hi = player._tier_hi or (reserve + 1.0)
+
+    # Track if this AI team has already applied ±0.5Cr for this player
+    key = f"{team.name}_{player.name}"
+    if key not in _ai_bid_adjustment_done:
+        adjustment = rng.choice([-0.5, 0, 0.5])
+        _ai_bid_adjustment_done[key] = True
+    else:
+        adjustment = 0.0  # no more ±0.5Cr adjustment for this team
+
+    bid = reserve + adjustment
+    bid = min(bid, tier_hi)  # respect tier ceiling
+
+    # Cap bid to 1%-30% of team purse
+    max_allowed = team.purse * 0.3
+    min_allowed = team.purse * 0.01
+    bid = min(bid, max_allowed)
+    bid = max(bid, min_allowed)
+
+    # Must be higher than current bid to place
+    if current_bid is not None and bid <= current_bid:
+        return None
+
+    # Ensure team can afford
+    if bid > team.purse:
+        return None
+
+    return round(bid, 2)
