@@ -1,0 +1,52 @@
+# -------------------------------
+# AI Bidding Logic with Single Increment by Highest Purse
+# -------------------------------
+def ai_bid_with_increment(team, player, current_bid: float, rng: random.Random, increment_used: dict, teams: dict) -> Optional[float]:
+    """
+    AI bid logic:
+    - Bid around hidden reserve ±0.5Cr
+    - Only one AI team can add +0.5Cr above randomized hidden reserve
+    - The increment is applied by the team with highest available purse at that moment
+    - Respect tier ceiling
+    """
+    if not team.has_slot() or not team.can_afford(player.base_price):
+        return None
+
+    reserve = player._hidden_reserve or player.base_price
+    tier_hi = player._tier_hi or (reserve + 1.0)
+
+    # Determine if increment can be applied
+    apply_increment = False
+    if not increment_used.get(player.name, False):
+        # Find AI team with highest purse (excluding human)
+        ai_teams = [t for t in teams.values() if t.name != teams[player.previous_team].name]  # exclude human
+        max_purse_team = max(ai_teams, key=lambda x: x.purse, default=None)
+        if max_purse_team and max_purse_team.name == team.name:
+            apply_increment = True
+            increment_used[player.name] = True
+
+    # Base bid ±0.5Cr
+    bid = reserve
+    if apply_increment:
+        bid += 0.5
+    else:
+        bid += rng.choice([-0.5, 0, 0.5])
+
+    # Ensure bid does not exceed tier ceiling
+    bid = min(bid, tier_hi)
+
+    # Cap based on team purse: 1%-30% of purse
+    max_allowed = team.purse * 0.3
+    min_allowed = team.purse * 0.01
+    bid = min(bid, max_allowed)
+    bid = max(bid, min_allowed)
+
+    # Must be higher than current bid
+    if current_bid is not None and bid <= current_bid:
+        return None
+
+    # Ensure affordability
+    if bid > team.purse:
+        return None
+
+    return round(bid, 2)
