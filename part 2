@@ -1,0 +1,62 @@
+# -------------------------------
+# CLI Helpers
+# -------------------------------
+def prompt_human_bid(player: Player, current_bid: Optional[Bid]) -> Optional[float]:
+    print(f"\nYour turn for {player.name} ({player.role}, base {player.base_price}Cr, age {player.age}).")
+    if current_bid is None:
+        print("No bids yet. Enter amount >= base or 'p' to pass.")
+    else:
+        print(f"Current bid: {current_bid.team} at {current_bid.amount}Cr.")
+    s = input("Bid: ").strip().lower()
+    if s in ("p", "pass", ""):
+        return None
+    try:
+        return round(float(s), 2)
+    except:
+        return None
+
+def attach_cli(engine: "AuctionEngine"):
+    def on_turn(player: Player, current_bid: Optional[Bid]) -> Optional[float]:
+        return prompt_human_bid(player, current_bid)
+    engine.on_human_turn = on_turn
+
+# -------------------------------
+# Default Teams / AuctionState
+# -------------------------------
+def default_teams(human_team: str) -> AuctionState:
+    teams = {
+        "csk": Team("csk", 16, 7, 55.0, 1),
+        "mi":  Team("mi", 16, 8, 45.0, 1),
+        "dc":  Team("dc", 17, 7, 73.0, 2),
+        "pbks":Team("pbks", 20, 8, 110.5, 4),
+        "gt":  Team("gt", 16, 7, 69.0, 1),
+        "rr":  Team("rr", 15, 7, 41.0, 0),
+        "kkr": Team("kkr", 15, 6, 51.0, 0),
+        "rcb": Team("rcb", 18, 8, 83.0, 3),
+        "lsg": Team("lsg", 16, 7, 69.0, 1),
+        "srh": Team("srh", 16, 5, 45.0, 1),
+    }
+    return AuctionState(teams=teams, constraints=Constraints(), human_team=human_team)
+
+# -------------------------------
+# Main CLI Loop
+# -------------------------------
+def main():
+    print("Select your team: csk, mi, kkr, rcb, gt, lsg, rr, pbks, dc, srh")
+    human = input("Team: ").strip().lower()
+    state = default_teams(human)
+    engine = AuctionEngine(state, seed=42)
+    attach_cli(engine)
+
+    while True:
+        name = input("\nEnter player name (or 'q' to quit): ").strip()
+        if name.lower() in ("q", "quit", "exit"):
+            break
+        slot = input("Slot: ").strip()
+        base = float(input("Base price (Cr): ").strip())
+        prev = input("Previous team for RTM (or '-' if none): ").strip().lower()
+        prev_team = None if prev == "-" else prev
+        age = None
+        role = None
+
+        player = Player(name=name, slot=slot, base_price=base, previous_team=prev_team, age=age, role=role)
