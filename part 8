@@ -1,0 +1,70 @@
+import random
+from dataclasses import dataclass, field
+from typing import Optional, Tuple
+
+# -------------------------------
+# Player Model
+# -------------------------------
+@dataclass
+class Player:
+    name: str
+    slot: str
+    base_price: float
+    previous_team: Optional[str]
+    age: Optional[int]
+    role: Optional[str]
+    
+    # Points (optional)
+    total_points: Optional[float] = None
+
+    # Hidden tier info
+    _tier_id: Optional[int] = field(default=None, repr=False)
+    _tier_lo: Optional[float] = field(default=None, repr=False)
+    _tier_hi: Optional[float] = field(default=None, repr=False)
+    _hidden_reserve: Optional[float] = field(default=None, repr=False)
+
+    def reveal_hidden_reserve(self) -> Optional[float]:
+        """Only reveal hidden reserve when explicitly called."""
+        return self._hidden_reserve
+
+# -------------------------------
+# Assign tier & hidden reserve
+# -------------------------------
+TIERS = [
+    (1, 0.30, 1.50),
+    (2, 1.50, 2.75),
+    (3, 3.00, 4.75),
+    (4, 5.00, 6.50),
+    (5, 7.00, 8.50),
+    (6, 9.00,10.50),
+    (7,11.00,12.50),
+    (8,13.00,15.50),
+    (9,16.00,18.00),
+]
+
+def tier_band(tier_id: int) -> Tuple[float, float]:
+    for tid, lo, hi in TIERS:
+        if tid == tier_id:
+            return lo, hi
+    return 1.0, 1.5
+
+def assign_hidden_reserve(player: Player, tier_id: int, rng: random.Random) -> Player:
+    lo, hi = tier_band(tier_id)
+    # Hidden reserve randomized within tier ceiling
+    player._tier_id = tier_id
+    player._tier_lo = lo
+    player._tier_hi = hi
+    player._hidden_reserve = round(rng.uniform(lo, hi), 2)
+    return player
+
+# -------------------------------
+# Example Usage
+# -------------------------------
+if __name__ == "__main__":
+    rng = random.Random(42)
+    player = Player(name="Jos Buttler", slot="O", base_price=2.0, previous_team="RR", age=31, role="W")
+    player = assign_hidden_reserve(player, tier_id=7, rng=rng)
+    
+    print(f"Player: {player.name}, Base Price: {player.base_price}Cr")  # Hidden reserve not shown
+    # Reveal only if needed
+    # print(f"(Hidden) Reserve: {player.reveal_hidden_reserve()}Cr")
