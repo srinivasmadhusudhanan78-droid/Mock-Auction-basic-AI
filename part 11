@@ -1,0 +1,280 @@
+import random
+from dataclasses import dataclass, field
+from typing import Optional, List, Tuple
+from enum import Enum
+
+# -------------------------------
+# Role & Tier Definitions
+# -------------------------------
+class Role(str, Enum):
+    B = "B"
+    W = "W"
+    A = "A"
+    P = "P"
+    S = "S"
+
+TIERS = [
+    (1, 0.30, 1.50),
+    (2, 1.50, 2.75),
+    (3, 3.00, 4.75),
+    (4, 5.00, 6.50),
+    (5, 7.00, 8.50),
+    (6, 9.00,10.50),
+    (7,11.00,12.50),
+    (8,13.00,15.50),
+    (9,16.00,18.00),
+]
+
+# -------------------------------
+# Player & Team Models
+# -------------------------------
+@dataclass
+class Player:
+    name: str
+    slot: str
+    base_price: float
+    previous_team: Optional[str]
+    age: Optional[int]
+    role: Optional[Role]
+
+    skill_points: float = 0
+    value_points: float = 0
+    multidim_points: float = 0
+    impact_points: float = 0
+    stats_points: float = 0
+    experience_points: float = 0
+    total_points: float = 0
+
+    _tier_id: Optional[int] = field(default=None, repr=False)
+    _tier_lo: Optional[float] = field(default=None, repr=False)
+    _tier_hi: Optional[float] = field(default=None, repr=False)
+    _hidden_reserve: Optional[float] = field(default=None, repr=False)
+
+@dataclass
+class Team:
+    name: str
+    total_slots: int
+    purse: float
+    rtm_available: int
+    squad: List[Player] = field(default_factory=list)
+
+    def has_slot(self) -> bool:
+        return len(self.squad) < self.total_slots
+
+    def can_afford(self, price: float) -> bool:
+        return self.purse >= price
+
+    def role_count(self, role: Role) -> int:
+        return sum(1 for p in self.squad if p.role == role)
+
+    def add_player(self, player: Player, price: float):
+        self.squad.append(player)
+        self.purse -= price
+
+# -------------------------------
+# Tier Allocation
+# -------------------------------
+def tier_band(tier_id: int) -> Tuple[float,float]:
+    for tid, lo, hi in TIERS:
+        if tid == tier_id:
+            return lo, hi
+    return 1.0, 1.5
+
+def points_to_tier(total_points: float) -> int:
+    if total_points < 4: return 1
+    elif total_points < 5: return 2
+    elif total_points < 6: return 3
+    elif total_points < 7: return 4
+    elif total_points < 8: return 5
+    elif total_points < 9: return 6
+    elif total_points < 10: return 7
+    elif total_points < 11: return 8
+    else: return 9
+
+def assign_points(player: Player, rng: random.Random) -> Player:
+    player.skill_points = {Role.B:1.0, Role.P:0.9, Role.S:0.85, Role.A:0.95, Role.W:0.9}.get(player.role,0.8)
+    player.value_points = 1.0  # ignoring base price dampening
+    player.multidim_points = 1.0 if player.role in [Role.A, Role.W] else 0.7
+    player.impact_points = 0.8 + 0.2*rng.random()
+    player.stats_points = 0.7 + 0.3*rng.random()
+    player.experience_points = 0.6 + 0.4*rng.random()
+    if player.age:
+        if 25 <= player.age <= 35:
+            age_factor = 1.0
+        elif player.age < 25:
+            age_factor = 0.9
+        else:
+            age_factor = 0.8
+    else:
+        age_factor = 0.9
+    player.total_points = (
+        2*player.skill_points + 
+        1.5*player.value_points + 
+        1.2*player.multidim_points + 
+        1.5*player.impact_points + 
+        1.5*player.stats_points + 
+        1.0*player.experience_points
+    )*age_factor
+    return player
+
+def assign_tier(player: Player, rng: random.Random) -> Player:
+    player = assign_points(player, rng)
+    points_tier = points_to_tier(player.total_points)
+    base_tier = {Role.A:5, Role.W:4, Role.B:3, Role.P:4, Role.S:4}.get(player.role,3)
+    final_tier = max(base_tier, points_tier)
+    lo, hi = tier_band(final_tier)
+    player._tier_id = final_tier
+    player._tier_lo = lo
+    player._tier_hi = hi
+    player._hidden_reserve = round(rng.uniform(lo, hi),2)
+    return player
+
+# -------------------------------
+# AI Bidding
+# -------------------------------
+def ai_bid(team, player, current_bid: float, rng: random.Random, ai_increment_used: dict) -> Optional[float]:
+    if not team.has_slot() or not team.can_afford(player.base_price):
+        return None
+
+    reserve = player._hidden_reserve or player.base_price
+    tier_hi = player._tier_hi or (reserve + 1.0)
+
+    # Only one AI team can add 0.5Cr
+    if player.name not in ai_increment_used and rng.random() < 0.5:
+        bid = min(reserve + 0.5, tier_hi)
+        ai_increment_used[player.name] = True
+    else:
+        bid = reserve
+
+    # Cap bid based on team purse: 1%-30%
+    max_spend = team.purse * 0.3
+    min_spend = team.purse * 0.01
+    bid = min(bid, max_spend)
+    bid = max(bid, min_spend)
+
+    if current_bid is not None and bid <= current_bid:
+        return None
+    if bid > team.purse:
+        return None
+    return round(bid,2)
+
+# -------------------------------
+# Auction Engine with Logging
+# -------------------------------
+def auction_engine():
+    rng = random.Random(42)
+    log: List[dict] = []
+
+    # Teams
+    teams = {
+        "csk": Team("csk",16,55.0,1),
+        "mi": Team("mi",16,45.0,1),
+        "dc": Team("dc",17,73.0,2),
+        "pbks": Team("pbks",20,110.5,4),
+        "gt": Team("gt",16,69.0,1),
+        "rr": Team("rr",15,41.0,0),
+        "kkr": Team("kkr",15,51.0,0),
+        "rcb": Team("rcb",18,83.0,3),
+        "lsg": Team("lsg",16,69.0,1),
+        "srh": Team("srh",16,45.0,1),
+    }
+
+    human_team_name = input("Select your team: ").strip().lower()
+    human_team = teams.get(human_team_name)
+    if not human_team:
+        print("Invalid team")
+        return
+
+    ai_increment_used = {}  # track 0.5Cr increment per player
+
+    while True:
+        data = input("\nEnter player (name-role-base-prev) or 'q' to quit: ").strip()
+        if data.lower() in ("q","quit","exit"):
+            break
+        try:
+            name, role_str, base_str, prev_team = data.split("-")
+            role = Role(role_str.strip().upper())
+            base = float(base_str)
+            prev_team = prev_team.strip().lower() if prev_team.strip() != "-" else None
+        except Exception:
+            print("Invalid format")
+            continue
+
+        player = Player(name=name.strip(), slot="", base_price=base,
+                        previous_team=prev_team, age=random.randint(22,36), role=role)
+        player = assign_tier(player, rng)
+
+        print(f"\nPlayer added: {player.name}, Role: {player.role}, Base: {player.base_price}Cr, Age: {player.age}")
+
+        current_bid = 0.0
+        last_bidder = None
+        auction_order = list(teams.keys())
+        rng.shuffle(auction_order)
+
+        while True:
+            all_pass = True
+            for tname in auction_order:
+                team = teams[tname]
+                if tname == human_team_name:
+                    s = input(f"Your bid (current {current_bid}Cr) or 'p' to pass: ").strip().lower()
+                    if s in ("p","pass",""):
+                        bid_amt = None
+                    else:
+                        try:
+                            bid_amt = float(s)
+                            if bid_amt <= current_bid or bid_amt > team.purse:
+                                bid_amt = None
+                        except:
+                            bid_amt = None
+                else:
+                    bid_amt = ai_bid(team, player, current_bid, rng, ai_increment_used)
+
+                if bid_amt is None:
+                    continue
+                current_bid = bid_amt
+                last_bidder = tname
+                all_pass = False
+                print(f"{tname.upper()} bids {current_bid}Cr")
+
+            if all_pass:
+                break
+
+        if last_bidder is None:
+            print("UNSOLD")
+            log.append({
+                "name": player.name,
+                "slot": player.slot,
+                "price": 0.0,
+                "sold_to": "UNSOLD",
+                "rtm": "No"
+            })
+            continue
+
+        rtm_used = False
+        if player.previous_team and player.previous_team in teams:
+            prev_team_obj = teams[player.previous_team]
+            if prev_team_obj.rtm_available > 0 and prev_team_obj.can_afford(current_bid):
+                use_rtm = input(f"{player.previous_team.upper()} has RTM available. Use? y/n: ").strip().lower()
+                if use_rtm == "y":
+                    last_bidder = player.previous_team
+                    rtm_used = True
+                    prev_team_obj.rtm_available -= 1
+
+        winner_team_obj = teams[last_bidder]
+        winner_team_obj.add_player(player, current_bid)
+
+        print(f"SOLD: {player.name} -> {last_bidder.upper()} {current_bid}Cr {'RTM' if rtm_used else ''}")
+
+        log.append({
+            "name": player.name,
+            "slot": player.slot,
+            "price": current_bid,
+            "sold_to": last_bidder.upper(),
+            "rtm": "Yes" if rtm_used else "No"
+        })
+
+    print("\n=== AUCTION LOG ===")
+    for entry in log:
+        print(f"{entry['name']}-{entry['slot']}-{entry['price']}Cr-{entry['sold_to']}-{entry['rtm']}")
+
+auction_engine()
