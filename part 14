@@ -109,3 +109,35 @@ def ai_fill_overseas(team, player, rng):
     player.is_overseas = True
     team.overseas_slots_filled = getattr(team, "overseas_slots_filled", 0) + 1
     return True
+
+
+import random
+from typing import Optional
+
+def auction_bid(player, user_team, user_bid: Optional[float], ai_teams: list, rng: random.Random):
+    """
+    Handles bidding for a player, showing which AI teams bid or counterbid.
+    """
+    current_bid = 0
+    highest_bid_team = None
+
+    # User bid
+    if user_bid is not None:
+        current_bid = user_bid
+        highest_bid_team = user_team
+        print(f"User ({user_team.name}) bids {current_bid} Cr")
+    else:
+        print(f"User passes on {player.name}")
+
+    # AI bidding loop
+    for ai_team in ai_teams:
+        ai_offer = ai_bid(ai_team, player, current_bid, rng)  # using your part6 ai_bid function
+        if ai_offer is not None and ai_offer > current_bid:
+            current_bid = ai_offer
+            highest_bid_team = ai_team
+            print(f"AI Team ({ai_team.name}) bids {current_bid} Cr")
+
+    if highest_bid_team is not None:
+        print(f"Player {player.name} sold to {highest_bid_team.name} for {current_bid} Cr")
+    else:
+        print(f"No sale for {player.name}, remains in auction pool")
