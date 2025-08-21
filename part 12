@@ -1,0 +1,131 @@
+# --- New enums/flags (put near Role/TIERS) ---
+from enum import Enum
+
+class SquadRole(str, Enum):
+    XI = "XI"                # definite part of XI
+    BACKUP = "BACKUP"        # solid backup
+    POTENTIAL = "POTENTIAL"  # not XI but definite potential
+    RAW = "RAW"              # great potential, very little experience
+
+# Extend Player with optional flags
+# add to your Player dataclass:
+# squad_role: Optional[SquadRole] = None
+# is_captaincy_candidate: bool = False
+# (keep defaults so older code keeps working)
+
+# --- Market helpers (put with other helpers) ---
+def auction_budget_factor(teams) -> float:
+    """Return avg remaining purse / avg initial purse, clamped to [0.05, 1.0]."""
+    # Store each team an attribute 'initial_purse' once at auction start
+    av_rem = sum(t.purse for t in teams.values()) / len(teams)
+    av_init = sum(getattr(t, "initial_purse", t.purse) for t in teams.values()) / len(teams)
+    if av_init <= 0: 
+        return 0.05
+    return clamp(av_rem / av_init, 0.05, 1.0)
+
+def tier_boundary_dilemma(points: float, boundary: float, eps: float = 0.15) -> bool:
+    return abs(points - boundary) <= eps
+
+def median_purse(teams) -> float:
+    vals = sorted(t.purse for t in teams.values())
+    n = len(vals)
+    return (vals[n//2] if n % 2 else 0.5*(vals[n//2-1] + vals[n//2]))
+
+# --- Adjust your point calc to add squad/captaincy & budget pressure ---
+def calculate_points(player: Player, rng: random.Random, teams=None) -> Player:
+    # (existing blocks unchanged) ...
+    # skill_points/value_points/multidim_points/impact_points/stats_points/experience_points/age_factor
+
+    # Captaincy boost -> multidimensionality (small, capped)
+    if getattr(player, "is_captaincy_candidate", False):
+        player.multidim_points = min(1.15, player.multidim_points + 0.10)
+
+    # Squad role boosts (applied additively before weighting)
+    squad = getattr(player, "squad_role", None)
+    squad_boost = 0.0
+    if squad == SquadRole.XI:
+        squad_boost = 0.35
+    elif squad == SquadRole.BACKUP:
+        squad_boost = 0.15
+    elif squad == SquadRole.POTENTIAL:
+        squad_boost = 0.25
+    elif squad == SquadRole.RAW:
+        # balance potential with low experience
+        squad_boost = 0.12
+
+    # base weighted sum (your original)
+    base_score = (
+        2*player.skill_points +
+        1.5*player.value_points +
+        1.2*player.multidim_points +
+        1.5*player.impact_points +
+        1.5*player.stats_points +
+        1.0*player.experience_points
+    )
+
+    # apply age
+    base_score *= (1.0 if (player.age and 25 <= player.age <= 35) else (0.9 if (player.age and player.age < 25) else (0.8 if (player.age and player.age > 35) else 0.9)))
+
+    # add squad role bump (post-age so it’s meaningful)
+    base_score += squad_boost
+
+    # Market pressure: shrink points as wallets shrink; gentle uplift early
+    if teams is not None:
+        bf = auction_budget_factor(teams)  # ∈ [0.05, 1]
+        market_scale = 0.9 + 0.2*bf       # ∈ [0.9, 1.1]
+        base_score *= market_scale
+
+    player.total_points = base_score
+    return player
+
+# --- Tier choice with purse-aware tie-break ---
+def assign_tier(player: Player, rng: random.Random, teams=None) -> Player:
+    player = calculate_points(player, rng, teams=teams)
+    # points_to_tier: unchanged function mapping
+    raw_tier = points_to_tier(player.total_points)
+
+    # If near a boundary, choose direction by purse
+    # Find the numeric boundary between raw_tier and its neighbor
+    # We approximate boundaries at integer score thresholds used in points_to_tier.
+    # Example thresholds: 4,5,6,7,8,9,10,11 (map them to tiers 1..9)
+    thresholds = [4,5,6,7,8,9,10,11]
+    # Determine the closest threshold around raw_tier
+    # (simple heuristic: threshold for next tier up)
+    idx = min(max(raw_tier-1, 0), len(thresholds)-1)
+    boundary = thresholds[idx]  # boundary to consider
+
+    final_tier = raw_tier
+    if teams is not None and tier_boundary_dilemma(player.total_points, boundary):
+        # Compare median purse to midpoint of the *upper* tier band
+        up_tier = clamp(raw_tier+1, 1, 9)
+        lo, hi = tier_band(up_tier)
+        mid_up = 0.5*(lo + hi)
+        if median_purse(teams) >= mid_up:
+            final_tier = up_tier
+        else:
+            final_tier = raw_tier  # keep or drop (we keep here; you could drop if you prefer)
+
+    # Base-tier floor (from role) still enforced
+    base_floor = {Role.A:5, Role.W:4, Role.B:3, Role.P:4, Role.S:4}.get(player.role, 3)
+    final_tier = max(final_tier, base_floor)
+
+    lo, hi = tier_band(final_tier)
+    anchor = max(player.base_price, lo)
+
+    # Reserve inside tier, as before
+    reserve = round(rng.uniform(anchor, hi) + 1e-9, 2)
+
+    player._tier_id = final_tier
+    player._tier_lo = lo
+    player._tier_hi = hi
+    player._hidden_reserve = reserve
+    return player
+
+# --- One-time init at auction start (so budget factor works) ---
+def default_teams(human_team: str) -> AuctionState:
+    state = ...  # your existing builder
+    # store each team's initial purse once
+    for t in state.teams.values():
+        if not hasattr(t, "initial_purse"):
+            t.initial_purse = t.purse
+    return state
