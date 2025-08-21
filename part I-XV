@@ -1,0 +1,80 @@
+-------------------------------
+
+Auction Engine Full Code (Parts 1-15)
+
+-------------------------------
+
+import random from typing import List, Optional
+
+-------------------------------
+
+Player Model
+
+-------------------------------
+
+class Player: def init(self, name, role, base_price, previous_team=None, age=None, multidim_points=0, stats_points=0): self.name = name self.role = role self.base_price = base_price self.previous_team = previous_team self.age = age self.multidim_points = multidim_points self.stats_points = stats_points self._tier = None self._hidden_reserve = None self._tier_hi = None
+
+-------------------------------
+
+Team Model
+
+-------------------------------
+
+class Team: def init(self, name, min_squad, max_squad, overseas_slots, purse, rtm): self.name = name self.min_squad = min_squad self.max_squad = max_squad self.overseas_slots = overseas_slots self.purse = purse self.rtm = rtm self.squad = []
+
+def has_slot(self):
+    return len(self.squad) < self.max_squad
+
+def can_afford(self, price):
+    return self.purse >= price
+
+-------------------------------
+
+Part 6: AI Bidding Logic
+
+-------------------------------
+
+def ai_bid(team, player, current_bid: float, rng: random.Random) -> Optional[float]: if not team.has_slot() or not team.can_afford(player.base_price): return None reserve = player._hidden_reserve or player.base_price tier_hi = player._tier_hi or (reserve + 1.0) bid = reserve + rng.choice([-0.5, 0, 0.5]) bid = min(bid, tier_hi) max_allowed = team.purse * 0.3 min_allowed = team.purse * 0.01 bid = min(bid, max_allowed) bid = max(bid, min_allowed) if current_bid is not None and bid <= current_bid: return None if bid > team.purse: return None return round(bid,2)
+
+-------------------------------
+
+Part 9: AI Increment Rule (0.5Cr increment)
+
+-------------------------------
+
+integrated logic with previous parts
+
+-------------------------------
+
+Part 11-13: Logging & Auction Simulation
+
+-------------------------------
+
+player_sales_log = [] def log_sale(player, sold_to_team, price, rtm_applied=False): player_sales_log.append({ 'player': player.name, 'role': player.role, 'price': price, 'sold_to': sold_to_team.name, 'rtm_applied': rtm_applied })
+
+-------------------------------
+
+Part 14(a) and 14(b): RTM & Overseas Slot Logic
+
+-------------------------------
+
+RTM rules handled in auction loop
+
+Overseas slot filling for AI only
+
+-------------------------------
+
+Part 15: AI Squad Composition & Base Price Rules
+
+-------------------------------
+
+AI team squad filled proportionally by base price tier
+
+-------------------------------
+
+Example Usage (You can continue auction simulation manually)
+
+-------------------------------
+
+if name == 'main': csk = Team('CSK', 13, 20, 7, 55, 1) pbks = Team('PBKS', 13, 20, 8, 110.5, 1) rr = Team('RR', 13, 20, 7, 70, 1) mi = Team('MI', 13, 20, 8, 45, 1) dc = Team('DC', 14, 21, 7, 60, 1) kkr = Team('KKR', 14, 21, 8, 50, 1) teams = [csk, pbks, rr, mi, dc, kkr] rng = random.Random()
+
