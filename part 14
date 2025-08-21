@@ -1,0 +1,111 @@
+import random
+from typing import Optional
+
+# -------------------------------
+# Part 14(a): User-bid above ceiling & RTM handling
+# -------------------------------
+def determine_winner(player, user_team, user_bid: float, teams: dict, rng: random.Random):
+    """
+    Determine final sale of a player considering:
+    - User can bid above ceiling
+    - AI max bid = ceiling + 0.5 Cr once
+    - RTM applied by previous team if available
+    - Proper purse deduction
+    """
+    tier_hi = player._tier_hi or (player._hidden_reserve + 1.0)
+    final_bid = user_bid
+    winner_team_name = user_team.name
+    rtm_used = False
+
+    # 1️⃣ Check AI bids (max ceiling + 0.5Cr by highest AI purse team)
+    ai_bids = []
+    ai_increment_done = False
+    for tname, team in sorted(teams.items(), key=lambda x: -x[1].purse):
+        if tname == user_team.name:
+            continue
+        if team.has_slot() and team.can_afford(player.base_price):
+            # Determine AI bid
+            bid = player._hidden_reserve + rng.choice([0, 0.5]) if not ai_increment_done else player._hidden_reserve
+            bid = min(bid, tier_hi + 0.5)
+            bid = min(bid, team.purse * 0.3)
+            if bid > player._hidden_reserve and not ai_increment_done:
+                ai_increment_done = True  # Only one AI team can do +0.5 increment
+            ai_bids.append((tname, bid))
+    # Highest AI bid (if any)
+    if ai_bids:
+        highest_ai_team, highest_ai_bid = max(ai_bids, key=lambda x: x[1])
+        if highest_ai_bid > final_bid:
+            final_bid = highest_ai_bid
+            winner_team_name = highest_ai_team
+
+    # 2️⃣ Check RTM from previous team
+    prev_team_name = player.previous_team
+    if prev_team_name and prev_team_name in teams:
+        prev_team_obj = teams[prev_team_name]
+        if prev_team_obj.rtm_available > 0 and prev_team_obj.can_afford(final_bid):
+            # Assume previous team chooses to use RTM
+            winner_team_name = prev_team_name
+            rtm_used = True
+
+    # 3️⃣ Deduct purse
+    winner_team_obj = teams[winner_team_name]
+    winner_team_obj.purse -= final_bid
+    if rtm_used:
+        winner_team_obj.rtm_available -= 1
+    winner_team_obj.add_player(player, final_bid)
+
+    # 4️⃣ Log sale (brief format)
+    sale_log = {
+        "player": player.name,
+        "slot": player.role.name if player.role else "",
+        "price": final_bid,
+        "sold_to": winner_team_name,
+        "RTM_used": rtm_used
+    }
+
+    return sale_log
+
+
+
+# -------------------------------
+# Part 14(b): AI Overseas Slot Allocation Rules
+# -------------------------------
+def ai_can_fill_overseas_slot(team, player):
+    """
+    Checks if an AI team can fill an overseas slot for the given player
+    based on max 30% per role rule and role preference.
+    User team is exempted from this restriction.
+    """
+    if getattr(team, "is_user_team", False):
+        return True  # user team exempted
+
+    # Only consider overseas players
+    if getattr(player, "is_overseas", False):
+        total_overseas = getattr(team, "overseas_slots_total", 0)
+        filled_overseas = getattr(team, "overseas_slots_filled", 0)
+        role_count = sum(1 for p in team.squad if p.role == player.role and getattr(p, "is_overseas", False))
+
+        # Maximum allowed per role: 30% of total overseas slots
+        max_per_role = max(1, int(total_overseas * 0.3))
+
+        if filled_overseas >= total_overseas:
+            return False
+        if role_count >= max_per_role:
+            return False
+    return True
+
+def ai_fill_overseas(team, player, rng):
+    """
+    Fill overseas slots iteratively based on role preference:
+    Allrounder -> Pace -> Batter -> Wicketkeeper -> Spin
+    Max 30% per role
+    """
+    role_preference = ["A", "P", "B", "W", "S"]
+    if player.role not in role_preference:
+        return False
+    if not ai_can_fill_overseas_slot(team, player):
+        return False
+    # Mark the player as filling an overseas slot
+    player.is_overseas = True
+    team.overseas_slots_filled = getattr(team, "overseas_slots_filled", 0) + 1
+    return True
