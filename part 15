@@ -1,0 +1,67 @@
+import random
+from typing import List
+
+# -------------------------------
+# AI Team Squad Filler Based on Tiers, Purse & Roles
+# -------------------------------
+def fill_ai_squad(team, players_pool: List, rng: random.Random):
+    """
+    Fill AI team squad according to tier, base price, purse, role, and overseas rules.
+    - High level: Tier 7-9 (35% slots, up to 40% purse)
+    - Mid level: Tier 5-6 (30% slots, up to 40% purse)
+    - Low level: Tier 3-4 (25% slots, 20-30% purse)
+    - Lowest level: Tier 1-2 (10-15% slots, 10% purse)
+    - Always fill available slots, max 2 unfilled.
+    """
+    total_slots = team.total_slots
+    slots_to_fill = total_slots
+    purse = team.purse
+
+    # Tier level mapping
+    high_tiers = [7,8,9]
+    mid_tiers = [5,6]
+    low_tiers = [3,4]
+    lowest_tiers = [1,2]
+
+    # Percentage allocations
+    allocations = [
+        ("high", 0.35, 0.4, high_tiers),
+        ("mid", 0.3, 0.4, mid_tiers),
+        ("low", 0.25, 0.3, low_tiers),
+        ("lowest", 0.15, 0.1, lowest_tiers),
+    ]
+
+    # Shuffle players pool
+    rng.shuffle(players_pool)
+
+    for level_name, slot_pct, purse_pct, tiers in allocations:
+        slots_for_level = max(1, int(total_slots * slot_pct))
+        max_purse_for_level = purse * purse_pct
+        spent = 0
+        filled = 0
+
+        for player in players_pool:
+            if filled >= slots_for_level or spent >= max_purse_for_level:
+                break
+            if player._tier_id in tiers and player.base_price <= (max_purse_for_level - spent):
+                # Check if slot available
+                if team.has_slot():
+                    # Add player
+                    bid_price = max(player.base_price, 0)  # Base price min
+                    team.add_player(player, bid_price)
+                    spent += bid_price
+                    filled += 1
+
+        purse -= spent  # Reduce team purse
+
+    # Fill remaining slots with any available players respecting purse
+    for player in players_pool:
+        if team.has_slot() and team.can_afford(player.base_price):
+            team.add_player(player, player.base_price)
+        if team.total_slots - len(team.squad) <= 2:  # flexible unfilled slots
+            break
+
+    return team
+
+# Example usage:
+# fill_ai_squad(pbks_team, available_players_pool, random.Random(42))
