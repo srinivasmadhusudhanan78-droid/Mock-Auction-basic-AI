@@ -1,0 +1,78 @@
+import random
+from typing import Optional
+def auction_with_strict_tier(player, user_team, teams, rng: random.Random):
+    """
+    Conduct auction for a single player under strict tier rules:
+    - Player sold only within assigned tier range.
+    - User can counterbid before final sale.
+    - RTM only triggers if winning bid exceeds tier ceiling.
+    """
+    tier_hi = player._tier_hi or player.base_price
+    tier_lo = player._tier_lo or player.base_price
+    current_bid = 0.0
+    last_bidder = None
+    ai_increment_done = False
+    # Shuffle AI teams for bidding order
+    ai_order = [t for t in teams.values() if t != user_team]
+    rng.shuffle(ai_order)
+    # Initial AI bidding loop
+    for team in ai_order:
+        if not team.has_slot() or not team.can_afford(player.base_price):
+            continue
+        reserve = player._hidden_reserve or player.base_price
+        bid = reserve + (0.5 if not ai_increment_done and rng.random() < 0.5 else 0)
+        bid = min(bid, tier_hi)  # Cap bid at tier ceiling
+        bid = min(bid, team.purse * 0.3)  # Cap at 30% purse
+        if bid > current_bid:
+            current_bid = bid
+            last_bidder = team
+            if bid > reserve:
+                ai_increment_done = True
+            print(f"{team.name.upper()} bids {current_bid}Cr")
+    # Ask user for counter bid if AI bid exists
+    if last_bidder is not None:
+        print(f"\nCurrent highest bid: {current_bid}Cr by {last_bidder.name.upper()}")
+        s = input(f"Your turn ({user_team.name}). Enter bid <= {tier_hi}Cr or 'p' to pass: ").strip()
+        if s.lower() in ("p", "pass", ""):
+            user_bid = None
+        else:
+            try:
+                user_bid = float(s)
+                if user_bid > tier_hi or user_bid <= current_bid or user_bid > user_team.purse:
+                    print("Invalid bid. Automatically passing.")
+                    user_bid = None
+            except:
+                user_bid = None
+        if user_bid is not None:
+            current_bid = user_bid
+            last_bidder = user_team
+            print(f"{user_team.name.upper()} bids {current_bid}Cr")
+    # Check if highest bid exceeds tier_hi → RTM can be applied
+    rtm_used = False
+    if current_bid > tier_hi and player.previous_team in teams:
+        prev_team_obj = teams[player.previous_team]
+        if prev_team_obj.rtm_available > 0 and prev_team_obj.can_afford(current_bid):
+            use_rtm = input(f"{player.previous_team.upper()} can use RTM for {current_bid}Cr. Use? y/n: ").strip().lower()
+            if use_rtm == "y":
+                last_bidder = prev_team_obj
+                rtm_used = True
+                prev_team_obj.rtm_available -= 1
+                print(f"RTM used by {prev_team_obj.name.upper()} at {current_bid}Cr")
+    # Finalize sale if someone bid
+    if last_bidder is not None:
+        last_bidder.add_player(player, current_bid)
+        print(f"\nSOLD: {player.name} -> {last_bidder.name.upper()} for {current_bid}Cr {'(RTM)' if rtm_used else ''}")
+        return {
+            "player": player.name,
+            "price": current_bid,
+            "sold_to": last_bidder.name.upper(),
+            "rtm_used": rtm_used
+        }
+    else:
+        print(f"\n{player.name} remains UNSOLD")
+        return {
+            "player": player.name,
+            "price": 0.0,
+            "sold_to": "UNSOLD",
+            "rtm_used": False
+        }
