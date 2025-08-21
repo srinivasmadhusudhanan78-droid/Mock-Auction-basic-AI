@@ -1,0 +1,124 @@
+import json
+from typing import List, Dict, Any
+
+# ======================================================
+# Auction Sale Logger (Groups of 6, Persistent)
+# ======================================================
+
+class AuctionLogger:
+    def __init__(self, filename="auction_log.json"):
+        self.sales: List[Dict[str, Any]] = []   # in-memory sales
+        self.filename = filename
+
+    def log_sale(self, player_name: str, slot: str, price: float, team: str, rtm_used: bool):
+        """Atomic logging after sale is finalized"""
+        record = {
+            "player": player_name,
+            "slot": slot,
+            "price": price,
+            "team": team,
+            "RTM": rtm_used
+        }
+        # Append immutably
+        self.sales.append(record)
+
+        # If group of 6 completed → save batch
+        if len(self.sales) % 6 == 0:
+            self._persist_log()
+
+    def _persist_log(self):
+        """Write logs in groups of 6 to JSON file"""
+        try:
+            with open(self.filename, "r") as f:
+                data = json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            data = []
+
+        # Append new batch of 6
+        last_six = self.sales[-6:]
+        data.append(last_six)
+
+        with open(self.filename, "w") as f:
+            json.dump(data, f, indent=2)
+
+    def get_log(self):
+        """Return all sales so far (grouped in 6)"""
+        try:
+            with open(self.filename, "r") as f:
+                return json.load(f)
+        except (FileNotFoundError, json.JSONDecodeError):
+            return []
+
+# ======================================================
+# Auction Finalizer
+# ======================================================
+
+class AuctionFinalizer:
+    def __init__(self, logger: AuctionLogger):
+        self.logger = logger
+
+    def finalize_sale(self, player, team, price: float, rtm_used: bool):
+        """
+        Single source of truth: finalize + log + purse updates
+        """
+        # Update team purse & RTM
+        team.purse -= price
+        if rtm_used:
+            team.rtm -= 1
+
+        # Mark player as sold
+        player.sold_to = team.name
+        player.final_price = price
+
+        # Log atomic sale
+        self.logger.log_sale(player.name, player.slot, price, team.name, rtm_used)
+
+        # Return short confirmation (point format)
+        return [
+            f"✔ {player.name} sold",
+            f"🏏 Team: {team.name}",
+            f"💰 Price: {price} Cr",
+            f"RTM used: {'Yes' if rtm_used else 'No'}"
+        ]
+
+# ======================================================
+# Example Usage (Stub for Players & Teams)
+# ======================================================
+
+class Team:
+    def __init__(self, name, purse, rtm):
+        self.name = name
+        self.purse = purse
+        self.rtm = rtm
+
+class Player:
+    def __init__(self, name, slot, prev_team=None):
+        self.name = name
+        self.slot = slot
+        self.prev_team = prev_team
+        self.sold_to = None
+        self.final_price = None
+
+# ======================================================
+# DEMO
+# ======================================================
+if __name__ == "__main__":
+    logger = AuctionLogger()
+    finalizer = AuctionFinalizer(logger)
+
+    # Example teams
+    csk = Team("CSK", 90, 1)
+    rr = Team("RR", 85, 1)
+
+    # Example player
+    buttler = Player("Jos Buttler", "WB", prev_team="RR")
+
+    # Finalize sale (simulated outcome)
+    result = finalizer.finalize_sale(buttler, rr, 11.5, rtm_used=True)
+
+    # Display final short log for player
+    print("\n".join(result))
+
+    # Show grouped logs
+    print("\n=== Auction Log So Far (Grouped in 6) ===")
+    print(json.dumps(logger.get_log(), indent=2))
